@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JSCAD AI Agent</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🤖 JSCAD AI Agent</h1>
+      <p>Describe what you want to create, and I'll generate the JSCAD code for you!</p>
+    </div>
+
+    <div class="main-content">
+      <div class="chat-section">
+        <div class="chat-container" id="chatContainer">
+          <div class="message bot-message">
+            <div class="message-content">
+              <strong>AI Agent:</strong> Hello! I can help you generate JSCAD scripts. Try asking me to create something like:
+              <ul>
+                <li>"Create a simple car"</li>
+                <li>"Make a house with a roof"</li>
+                <li>"Design a coffee mug"</li>
+                <li>"Build a gear wheel"</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <div class="input-section">
+          <textarea 
+            id="userInput" 
+            placeholder="Describe what you want to create... (e.g., 'Create a simple car')"
+            rows="3"
+          ></textarea>
+          <button id="sendBtn" onclick="sendMessage()">
+            <span id="btnText">Send</span>
+            <span id="btnLoader" class="loader" style="display: none;"></span>
+          </button>
+        </div>
+      </div>
+
+      <div class="code-section">
+        <div class="code-header">
+          <h3>Generated JSCAD Code</h3>
+          <button onclick="copyCode()" class="copy-btn">Copy Code</button>
+        </div>
+        <pre id="codeOutput"><code>// Your generated JSCAD code will appear here...</code></pre>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
