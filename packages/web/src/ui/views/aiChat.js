@@ -1,4 +1,7 @@
 const html = require('nanohtml')
+const { LLMService, LLM_PROVIDERS, LLM_MODELS } = require('../../services/llmService')
+
+const llmService = new LLMService()
 
 const aiChatView = (state, editorCallbackToStream, i18n) => {
   const isVisible = state.activeTool === 'aiChat'
@@ -17,7 +20,7 @@ const aiChatView = (state, editorCallbackToStream, i18n) => {
     // Disable input
     input.disabled = true
     sendBtn.disabled = true
-    sendBtn.textContent = 'Sending...'
+    sendBtn.textContent = 'Generating...'
 
     // Add user message
     const userMsg = html`<div class="ai-chat-message ai-chat-user">
@@ -28,76 +31,64 @@ const aiChatView = (state, editorCallbackToStream, i18n) => {
     chatContainer.scrollTop = chatContainer.scrollHeight
 
     try {
-      // Get Groq API key from localStorage or prompt user
-      let apiKey = localStorage.getItem('GROQ_API_KEY')
-      
-      if (!apiKey) {
-        apiKey = prompt('Please enter your Groq API key (get one free at https://console.groq.com):')
+      // Check if API key exists
+      if (!llmService.getApiKey()) {
+        const providerInfo = llmService.getProviderInfo()
+        const apiKey = prompt(`Please enter your ${llmService.provider.toUpperCase()} API key:\n\nGet one at: ${providerInfo.apiUrl}`)
         if (apiKey) {
-          localStorage.setItem('GROQ_API_KEY', apiKey)
+          llmService.setApiKey(apiKey)
         } else {
           throw new Error('API key is required')
         }
       }
 
-      // Call Groq API
-      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: 'openai/gpt-oss-120b',
-          messages: [
-            {
-              role: 'system',
-              content: `You are an expert JSCAD (JavaScript CAD) code generator. Generate valid JSCAD scripts based on user descriptions.
+      const systemPrompt = `You are an expert JSCAD (JavaScript CAD) code generator. Generate COMPLETE, WORKING, SELF-CONTAINED JSCAD scripts.
 
-JSCAD uses JavaScript to create 3D models. Key concepts:
-1. Import from @jscad/modeling
-2. Use primitives: cuboid, sphere, cylinder
-3. Use transforms: translate, rotate, scale
-4. Use booleans: union, subtract, intersect
-5. Export a main function
+CRITICAL RULES:
+1. ALL code must be self-contained - define ALL variables and constants
+2. NO undefined variables or references
+3. Use ONLY @jscad/modeling functions
+4. ALWAYS include proper imports
+5. ALWAYS export a main function
+6. Use reasonable default values for all dimensions
 
-Example structure:
+JSCAD Structure:
 \`\`\`javascript
 const { cuboid, sphere, cylinder } = require('@jscad/modeling').primitives
-const { translate, rotate } = require('@jscad/modeling').transforms
-const { union, subtract } = require('@jscad/modeling').booleans
+const { translate, rotate, scale } = require('@jscad/modeling').transforms
+const { union, subtract, intersect } = require('@jscad/modeling').booleans
 
 const main = () => {
-  const box = cuboid({ size: [10, 10, 10] })
+  // Define ALL dimensions and values here
+  const width = 60
+  const height = 30
+  
+  // Create geometry
+  const box = cuboid({ size: [width, height, 15] })
+  
   return box
 }
 
 module.exports = { main }
 \`\`\`
 
-Respond with JSCAD code in a code block.`
-            },
-            { role: 'user', content: message }
-          ],
-          temperature: 0.7,
-          max_tokens: 2048
-        })
-      })
+Generate ONLY complete, working code with NO undefined variables. Respond with code in a markdown code block.`
 
-      if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.error?.message || 'API request failed')
-      }
+      const aiResponse = await llmService.chat([{ role: 'user', content: message }], systemPrompt)
 
-      const data = await response.json()
-      const aiResponse = data.choices[0]?.message?.content || 'No response generated'
-
-      // Extract code from response
-      const codeMatch = aiResponse.match(/```(?:javascript|js)?\n([\s\S]*?)```/)
+      // Extract code from response - try multiple patterns
+      let code = null
       
-      if (codeMatch && editorCallbackToStream) {
-        const code = codeMatch[1].trim()
-        
+      // Try markdown code block first
+      const codeBlockMatch = aiResponse.match(/```(?:javascript|js)?\n([\s\S]*?)```/)
+      if (codeBlockMatch) {
+        code = codeBlockMatch[1].trim()
+      } else if (aiResponse.includes('const') && aiResponse.includes('module.exports')) {
+        // If response looks like raw code (no markdown), use it directly
+        code = aiResponse.trim()
+      }
+      
+      if (code && editorCallbackToStream) {
         // Create a file tree structure like the editor does (must be an array)
         const fileTree = [{
           ext: 'js',
@@ -136,7 +127,7 @@ Respond with JSCAD code in a code block.`
       // Re-enable input
       input.disabled = false
       sendBtn.disabled = false
-      sendBtn.textContent = 'Send'
+      sendBtn.textContent = 'Generate'
       input.focus()
     }
   }
@@ -149,17 +140,59 @@ Respond with JSCAD code in a code block.`
   }
 
   const clearApiKey = () => {
-    localStorage.removeItem('GROQ_API_KEY')
+    llmService.clearApiKey()
     alert('API key cleared. You will be prompted for a new one on next message.')
   }
 
+  const changeProvider = (e) => {
+    const newProvider = e.target.value
+    llmService.setProvider(newProvider)
+    // Update model dropdown
+    const modelSelect = document.getElementById('aiModelSelect')
+    if (modelSelect) {
+      updateModelOptions(modelSelect, newProvider)
+    }
+  }
+
+  const changeModel = (e) => {
+    llmService.setModel(e.target.value)
+  }
+
+  const updateModelOptions = (selectElement, provider) => {
+    selectElement.innerHTML = ''
+    LLM_MODELS[provider].forEach(model => {
+      const option = document.createElement('option')
+      option.value = model.id
+      option.textContent = model.name
+      selectElement.appendChild(option)
+    })
+    selectElement.value = llmService.model
+  }
+
+  const providerInfo = llmService.getProviderInfo()
+
   return html`
-    <section id='aiChatPanel' class='popup-menu'>
+    <section id='aiChatPanel' class='ai-chat-sidebar'>
       <div id='aiChatContent'>
-        <h2>🤖 AI Assistant</h2>
+        <h2>AI Assistant</h2>
         
-        <div class='ai-chat-info'>
-          <p>Describe what you want to create:</p>
+        <div class='ai-chat-settings'>
+          <div class='ai-chat-setting-row'>
+            <label>Provider:</label>
+            <select id='aiProviderSelect' onchange=${changeProvider}>
+              <option value='${LLM_PROVIDERS.GEMINI}' ${providerInfo.provider === LLM_PROVIDERS.GEMINI ? 'selected' : ''}>Gemini</option>
+              <option value='${LLM_PROVIDERS.ANTHROPIC}' ${providerInfo.provider === LLM_PROVIDERS.ANTHROPIC ? 'selected' : ''}>Claude</option>
+              <option value='${LLM_PROVIDERS.GROQ}' ${providerInfo.provider === LLM_PROVIDERS.GROQ ? 'selected' : ''}>Groq</option>
+            </select>
+          </div>
+          <div class='ai-chat-setting-row'>
+            <label>Model:</label>
+            <select id='aiModelSelect' onchange=${changeModel}>
+              ${LLM_MODELS[providerInfo.provider].map(model => 
+                html`<option value='${model.id}' ${model.id === providerInfo.model ? 'selected' : ''}>${model.name}</option>`
+              )}
+            </select>
+          </div>
         </div>
 
         <div id='aiChatMessages' class='ai-chat-messages'></div>
@@ -167,12 +200,14 @@ Respond with JSCAD code in a code block.`
         <div class='ai-chat-input-section'>
           <textarea 
             id='aiChatInput' 
-            placeholder='e.g., "Create a simple car"'
-            rows='2'
+            placeholder='Describe what you want to create...'
+            rows='3'
             onkeypress=${handleKeyPress}
           ></textarea>
-          <button id='aiChatSendBtn' onclick=${sendMessage}>Generate</button>
-          <button onclick=${clearApiKey} class='ai-chat-clear-key' title='Clear API Key'>Clear Key</button>
+          <div class='ai-chat-buttons'>
+            <button id='aiChatSendBtn' onclick=${sendMessage} class='ai-chat-generate-btn'>Generate</button>
+            <button onclick=${clearApiKey} class='ai-chat-clear-key'>Clear Key</button>
+          </div>
         </div>
       </div>
     </section>
